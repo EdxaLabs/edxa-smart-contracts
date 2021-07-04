@@ -1,11 +1,15 @@
+// SPDX-License-Identifier: MIT
+
 pragma solidity 0.6.12;
 
 import './libs/SafeMath.sol';
 import './libs/IBEP20.sol';
 import './libs/SafeBEP20.sol';
+import "./libs/IReferral.sol"; //ONLY FOR EDXA IFO
 import './libs/ReentrancyGuard.sol';
+import './libs/Ownable.sol';
 
-contract IFO is ReentrancyGuard {
+contract IFO is ReentrancyGuard, Ownable {
     using SafeMath for uint256;
     using SafeBEP20 for IBEP20;
 
@@ -35,6 +39,7 @@ contract IFO is ReentrancyGuard {
     mapping (address => UserInfo) public userInfo;
     // participators
     address[] public addressList;
+    IReferral public tokenReferral; //ONLY FOR EDXA IFO
 
 
     event Deposit(address indexed user, uint256 amount);
@@ -71,12 +76,20 @@ contract IFO is ReentrancyGuard {
 
     function setRaisingAmount(uint256 _raisingAmount) public onlyAdmin {
         require (block.number < startBlock, 'no');
-        raisingAmount= _raisingAmount;
+        raisingAmount = _raisingAmount;
     }
 
-    function deposit(uint256 _amount) public {
+    function deposit(uint256 _amount, address _referrer) public {
         require (block.number > startBlock && block.number < endBlock, 'not ifo time');
         require (_amount > 0, 'need _amount > 0');
+
+        // Record for new referral
+        // Only for EDXA IFO
+        if (_amount > 0 && address(tokenReferral) != address(0) && _referrer != address(0) && _referrer != msg.sender) {
+            tokenReferral.recordReferralIFO(msg.sender, _referrer,_amount);
+        }
+        ////////////////
+
         lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
         if (userInfo[msg.sender].amount == 0) {
             addressList.push(address(msg.sender));
@@ -92,7 +105,9 @@ contract IFO is ReentrancyGuard {
         require (!userInfo[msg.sender].claimed, 'nothing to harvest');
         uint256 offeringTokenAmount = getOfferingAmount(msg.sender);
         uint256 refundingTokenAmount = getRefundingAmount(msg.sender);
-        offeringToken.safeTransfer(address(msg.sender), offeringTokenAmount);
+        if (offeringTokenAmount > 0) {
+            offeringToken.safeTransfer(address(msg.sender), offeringTokenAmount);
+        }
         if (refundingTokenAmount > 0) {
             lpToken.safeTransfer(address(msg.sender), refundingTokenAmount);
         }
@@ -138,8 +153,17 @@ contract IFO is ReentrancyGuard {
     function finalWithdraw(uint256 _lpAmount, uint256 _offerAmount) public onlyAdmin {
         require (_lpAmount <= lpToken.balanceOf(address(this)), 'not enough token 0');
         require (_offerAmount <= offeringToken.balanceOf(address(this)), 'not enough token 1');
-        require (block.number > endBlock, 'IFO still live');
-        lpToken.safeTransfer(address(msg.sender), _lpAmount);
-        offeringToken.safeTransfer(address(msg.sender), _offerAmount);
+        if(_offerAmount > 0) {
+            offeringToken.safeTransfer(address(msg.sender), _offerAmount);
+        }
+        if(_lpAmount > 0) {
+            lpToken.safeTransfer(address(msg.sender), _lpAmount);
+        }
+    }
+
+    // Update the token referral contract address by the owner
+    // FOR EDXA IFO
+    function setTokenReferral(IReferral _tokenReferral) public onlyOwner {
+        tokenReferral = _tokenReferral;
     }
 }
